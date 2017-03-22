@@ -1,4 +1,4 @@
-package client; 
+package client;
 
 import java.io.*;
 import java.net.*;
@@ -8,6 +8,8 @@ import org.jsoup.*;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
+
+import org.apache.commons.io.IOUtils;
 
 /* A class that implements a HTTP client, implementing
  * - GET
@@ -26,11 +28,10 @@ public class MyHTTPClient {
 	// Main function, initiated by command line or console MyHTTPClient
 	public static void main(String argv[]) throws Exception
 	{
-	
+			
 		 // Create a connection with the user
 	    BufferedReader inFromUser = new BufferedReader( new
 		InputStreamReader(System.in));
-	    
 	    String[] firstInput;
 		// Get arguments from user.
 	    // Command line arguments
@@ -57,29 +58,33 @@ public class MyHTTPClient {
 	    
 		// Create a connection to the server
 		Socket clientSocket = new Socket(domain, Port);
-		DataOutputStream outToServer = new DataOutputStream(clientSocket .getOutputStream());
-		BufferedReader inFromServer = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
+		OutputStream outToServerStream = clientSocket.getOutputStream();
+		InputStream inStream = clientSocket.getInputStream();
+		
+		DataOutputStream outToServer = new DataOutputStream(outToServerStream);
+		BufferedReader inFromServer = new BufferedReader(new InputStreamReader(inStream));
 		
 		//Based on HTTP command, go to the correct functionality
 		if (HTTPCommand.equals("GET")) {
 			// send the get request
 			sendGETRequest(HTTPCommand, requestURI, Port, outToServer, domain);
-			// Handle the response: display on terminal, store in file
-			handleGETResponse(outToServer, inFromServer, requestURI);
+			// Handle the response: display on terminal, store in file, get embedded files if necessary. Any new GET requests are sent with the same outputstream.
+			handleGETResponse(outToServerStream, inStream, requestURI, clientSocket);
 		}
 		else if (HTTPCommand.equals("HEAD")) {
 			sendHEADRequest(HTTPCommand, requestURI, Port, outToServer, domain);
 			// Handle the response: display on terminal, store in file
 			handleHEADResponse(outToServer, inFromServer, requestURI);
 		}
-//		if (HTTPCommand == "PUT") {
+		if (HTTPCommand.equals("PUT")) {
+			sendPUTRequest(HTTPCommand, requestURI, Port, clientSocket, outToServer);
+			handlePUTResponse(outToServerStream, inStream, requestURI, clientSocket);
+		}
+//		if (HTTPCommand.equals("POST")) {
 //			sendPOSTRequest(HTTPCommand, requestURI, Port);
 //		}
-//		if (HTTPCommand == "POST") {
-//			sendPUTRequest(HTTPCommand, requestURI, Port);
-//		}
-//		
-		// 
+		
+		 
 			
 		
 		
@@ -90,9 +95,112 @@ public class MyHTTPClient {
 
 	
 	}
+	// Prints the servers response to the terminal and stores it in a file
+	private static void handlePUTResponse(OutputStream outToServerStream, InputStream inStream, String requestURI,
+			Socket clientSocket) throws Exception {
+		// Create proper name for responseFile
+			String filename = requestURI.replace("/", "-");
+			filename = filename.replace(":", "_");
+			File responseFile = new File("C:\\Users\\Nathan\\Desktop\\" + filename + "." + "html"); // Create html file on the desktop
+			responseFile.createNewFile();
+					
+			// Ready to write
+			FileWriter fw = new FileWriter(responseFile.getAbsoluteFile());
+			BufferedWriter bw = new BufferedWriter(fw);
+			
+			// Ready to read text
+			BufferedReader textInFromServer = new BufferedReader(new InputStreamReader(inStream));
+			// Deal with the response line
+			// Deal with the response line
+			String[] responseLine = handleResponseLine(textInFromServer, bw);
+			String protocolversion = responseLine[0];
+			String statusCode = responseLine[1];
+			String phrase = responseLine[2];
+			
+			// based on response, do correct stuff
+			if (statusCode.startsWith("1")) {
+				handleResponseLine(textInFromServer, bw);
+				// If 200, go right on
+			} else if (statusCode.startsWith("2")) {
+					// Deal with the headers: print out and write away, and return a map containing key: header name and value: header value pairs
+					HashMap<String, String> headersMap = handleHeaders(textInFromServer, bw);
+					
+					// Only deal with websites using content-length
+					if (!headersMap.containsKey("Content-Length:")){
+						throw new Exception("Can only deal with websites using content-length header");
+					}
+					int counter = Integer.parseInt(headersMap.get("Content-Length:"));
+					
+					// Always write complete response to an html file and terminal
+					// Store text in file and write to terminal.
+					
+					byte[] body = handleBody(counter, textInFromServer, bw);
+		
+							
+					// Take the appropriate action based on content-type: for now only text and images are supported
+					String contentType = headersMap.get("Content-Type:");
+					String type = contentType.split("/")[0];
+					String subType = contentType.split("/")[1];
+					
+					// Handle appropriately according to type. No longer give bufferedStream as argument, since it needn't be sequential anymore.
+					if (type.equals("text") ){
+						handleText(responseFile, requestURI, subType);
+					// Past the headers, should have a proper counter now, start dealing with message body
+					}
+			
+			}else {
+				throw new Exception("Can't deal with this yet: " + statusCode +" "+ phrase);
+			}
+			
+			
+			// 
+			
+			return;
+		
+	}
+	// Sends a put request
+	private static void sendPUTRequest(String HTTPCommand, String requestURI, int port, Socket clientSocket, DataOutputStream outToServer) throws IOException {
+		
+		// parse the requestURI
+		String scheme = requestURI.split("://")[0];
+		String domain = requestURI.split("//")[1].split("/")[0];
+		String baseURI = scheme + "://" + domain + "/";
+		String path = requestURI.replace(baseURI, "");
+		
+		//Get additional user input as string
+		BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
+		// Initiate entity string
+		String entity = "";
+		System.out.println("Enter data: ");
+		
+		// Keep on reading until empty line
+		boolean noMoreLines = false;
+		while (!noMoreLines){
+			String line = br.readLine();
+			if (line.length() == 0){
+				noMoreLines = true;
+				
+			} else {
+				entity += URLEncoder.encode(line, "UTF-8");
+			}	
+		}
+		
+		// Data collected, now send request to server
+		
+		String requestLineAndHostHeader = HTTPCommand + " " + "/" + path + " " + "HTTP/1.1 " + "\r\n" + "Host:" + " " + domain + "\r\n";
+		
+		String contentLengthHeader = "Content-Length: " + entity.length() + "\r\n\r\n";
+		String request = requestLineAndHostHeader + contentLengthHeader + entity;
+		System.out.println(request);
+		outToServer.writeBytes(request + "\r\n\r\n");
+		
+		
+	}
+	
+	
 	// Prints out the server response to the terminal and stores it in a .txt file
 	private static void handleHEADResponse(DataOutputStream outToServer, BufferedReader inFromServer,
-			String requestURI) throws IOException {
+			String requestURI) throws Exception {
 		// Create proper name for responseFile
 				String filename = requestURI.replace("/", "-");
 				filename = filename.replace(":", "_");
@@ -115,12 +223,19 @@ public class MyHTTPClient {
 				return;
 		
 	}
-	// Prints out and stores the ResponseLine
-	private static void handleResponseLine(BufferedReader inFromServer, BufferedWriter bw) throws IOException {
-		String serverResponseLine = inFromServer.readLine();
+	// Prints out and stores the ResponseLine, and returns the protocol version, status code and its associated textual phrase
+	private static String[] handleResponseLine(BufferedReader textInFromServer, BufferedWriter bw) throws Exception {
+		String serverResponseLine = textInFromServer.readLine();
+		System.out.println(serverResponseLine);
+		String protocolVersion = serverResponseLine.split("\\s+")[0];
+		String statusCode = serverResponseLine.split("\\s+")[1];
+		String phrase = serverResponseLine.split("\\s+", 3)[2];
+		
+
 		System.out.println(serverResponseLine);
 		bw.write(serverResponseLine);
 		bw.newLine();
+		return new String[]{protocolVersion, statusCode, phrase};
 		
 	}
 	// Method that sends a GET request to the server in the correct format
@@ -145,7 +260,7 @@ public class MyHTTPClient {
 	}
 
 	// Prints out the server response to the terminal and stores it in a .txt file
-	private static void handleGETResponse(DataOutputStream outToServer, BufferedReader inFromServer, String requestURI) throws Exception {
+	private static void handleGETResponse(OutputStream outStream, InputStream inStream, String requestURI, Socket clientSocket) throws Exception {
 		
 		// Create proper name for responseFile
 		String filename = requestURI.replace("/", "-");
@@ -157,92 +272,85 @@ public class MyHTTPClient {
 		FileWriter fw = new FileWriter(responseFile.getAbsoluteFile());
 		BufferedWriter bw = new BufferedWriter(fw);
 		
+		// Ready to read text
+		BufferedReader textInFromServer = new BufferedReader(new InputStreamReader(inStream));
 		// Deal with the response line
-		handleResponseLine(inFromServer, bw);
+		String[] responseLine = handleResponseLine(textInFromServer, bw);
+		String protocolversion = responseLine[0];
+		String statusCode = responseLine[1];
+		String phrase = responseLine[2];
 		
-		// Deal with the headers: print out and write away, and return a map containing key: header name and value: header value pairs
-		HashMap<String, String> headersMap = handleHeaders(inFromServer, bw);
-		
-		// Only deal with websites using content-length
-		if (!headersMap.containsKey("Content-Length:")){
-			throw new Exception("Can only deal with websites using content-length header");
-		}
-		int counter = Integer.parseInt(headersMap.get("Content-Length:"));
-		
-		// Always write complete response to an html file and terminal
-		// Store text in file and write to terminal. Make a string containing the message body for later use as well
-		String messageBody = "";
-				while (counter > 0){
-					String serverBodyLine = inFromServer.readLine();
-					counter -= (serverBodyLine.length() + 1); // adjust counter
-					
-					messageBody = messageBody + serverBodyLine;
-//					System.out.println(messageBody);
-					// TODO Decide whether extracting body in string is worth it
-					System.out.println(serverBodyLine);
-					bw.write(serverBodyLine);
-					bw.newLine();
-				}
-				bw.close();
+		// based on response, do correct stuff
+		if (statusCode.startsWith("1")) {
+			handleResponseLine(textInFromServer, bw);
+			// If 200, go right on
+			} else if (statusCode.startsWith("2")) {
+			
+				// Deal with the headers: print out and write away, and return a map containing key: header name and value: header value pairs
+				HashMap<String, String> headersMap = handleHeaders(textInFromServer, bw);
 				
-		// Take the appropriate action based on content-type: for now only text and images are supported
-		String contentType = headersMap.get("Content-Type:");
-		String type = contentType.split("/")[0];
-		String subType = contentType.split("/")[1];
+				// Only deal with websites using content-length
+				if (!headersMap.containsKey("Content-Length:")){
+					throw new Exception("Can only deal with websites using content-length header");
+				}
+				int counter = Integer.parseInt(headersMap.get("Content-Length:"));
+				
+				// Always write complete response to an html file and terminal
+				// Store text in file and write to terminal.
+				
+				byte[] body = handleBody(counter, textInFromServer, bw);
 		
-		// Handle appropriately according to type
-		if (type.equals("text") ){
-			handleText(responseFile, requestURI, subType, outToServer, inFromServer);
-		} else if (type.equals("image")){
-			handleImage(responseFile, requestURI, subType);
-		}
-		// Past the headers, should have a proper counter now, start dealing with message body
-		
-		
-		//TODO Check for embedded stuff
-
-		
-		
-		// 
+						
+				// Take the appropriate action based on content-type: for now only text and images are supported
+				String contentType = headersMap.get("Content-Type:");
+				String type = contentType.split("/")[0];
+				String subType = contentType.split("/")[1];
+				
+				// Handle appropriately according to type. No longer give bufferedStream as argument, since it needn't be sequential anymore.
+				if (type.equals("text") ){
+					handleText(responseFile, requestURI, subType);
+				// Past the headers, should have a proper counter now, start dealing with message body
+				}
+			}else {
+				throw new Exception("Can't deal with this yet: " + statusCode + phrase);
+			}
 		
 		return;
 		
 		
 		
 	}
-	// Stores the image in an appropriate file, based on the html file representing the server's answer
-	private static void handleImage(File responseFile, String requestURI, String subType) throws IOException {
-	
-		//  Create imageFile
-		// Create proper name for responseFile
-		String filename = requestURI.replace("/", "-");
-		filename = filename.replace(":", "_");
-		File imageFile = new File("C:\\Users\\Nathan\\Desktop\\" + filename + "." + subType); // Create image file on the desktop
-		imageFile.createNewFile();
-		
-		// Establish streams
-		FileOutputStream fos = new FileOutputStream(responseFile);
-		FileInputStream fis = new FileInputStream(imageFile);
-			
-		// skip headers
+
+	// Method that writes the body from the server response to the same html file as the header, prints it to the terminal
+	private static byte[] handleBody(int counter, BufferedReader textInFromServer, BufferedWriter bw) throws IOException {
 		
 		
+		while (counter > 0){
+			String serverBodyLine = textInFromServer.readLine();
+			counter -= (serverBodyLine.length() + 1); // adjust counter
+			bw.write(serverBodyLine);
+			bw.newLine();
+		}
+		bw.close();
+		return new byte[0];
 	}
+
 	// Handles message body of type text appropriately
-	private static void handleText(File responseFile, String requestURI, String subType, DataOutputStream outToServer, BufferedReader inFromServer) throws Exception {
+	private static void handleText(File responseFile, String requestURI, String subType) throws Exception {
 		
 
 		// For now only html subtype has a specialised handling
 		if (subType.equals("html")) {
-			handleHtml(responseFile, requestURI, outToServer, inFromServer);
+			handleHtml(responseFile, requestURI, subType);
 		}
 		else {
 			return;
 		}
+		return;
 	}
 	
 	// Method that checks for embedded images and stores those, still with the same connection
-	private static void handleHtml(File responseFile, String requestURI, DataOutputStream outToServer, BufferedReader inFromServer) throws Exception{
+	private static void handleHtml(File responseFile, String requestURI, String subType) throws Exception{
 		String scheme = requestURI.split("/")[0];
 		String domain = requestURI.split("//")[1].split("/")[0];
 		String baseURI = scheme + "//" + domain + "/";
@@ -252,22 +360,127 @@ public class MyHTTPClient {
 		Elements imageLinks = doc.getElementsByTag("img");
 		System.out.println("imageLinks:" + imageLinks);
 		
-		// for each of the images, apply GET command
+		// for each of the images, retrieve them in a similar fashion to the handleGETResponse method
 		for (Element imageLink: imageLinks){
-			String link = imageLink.attr("src");
-			System.out.println(link);
-			handleGETResponse(outToServer, inFromServer, requestURI);
+			
+			
+			// Create new connection to server for every GET-request
+			Socket clientSocket = new Socket(domain, 80);
+			OutputStream outStream = clientSocket.getOutputStream();
+			BufferedInputStream inStream = new BufferedInputStream(clientSocket.getInputStream());
+			
+			
+			//Extract path
+			String uri = imageLink.attr("src");
+			String path = uri.replace(baseURI, "");
+			
+			// Send request
+			DataOutputStream dataOutStream = new DataOutputStream(outStream);
+			String request = "GET" + " " + uri + " " + "HTTP/1.1 " + "\r\n" + "Host:" + " " + domain; // Can send complete uri?
+			dataOutStream.writeBytes(request + "\r\n\r\n");
+			
+			System.out.println(inStream.markSupported());
+			inStream.mark(0);
+			
+			
+			
+			System.out.println("Out to server imageRequest: " + "\r\n" + request);
+			// Ready to read text
+			BufferedReader textInFromServer = new BufferedReader( new InputStreamReader(inStream) );
+			
+			// Deal with status line
+			String statusLine = textInFromServer.readLine();
+			
+			
+			
+			// Deal with the headers: print out and write away, and return a map containing key: header name and value: header value pairs
+			HashMap<String, String> headersMap = new HashMap<>();
+			// Keep going until at first CRLF
+			while (true) {
+
+					String serverHeaderSentence = textInFromServer.readLine();
+					System.out.println(serverHeaderSentence);
+					// Check if we're at empty line
+					if (serverHeaderSentence.isEmpty()){
+						break;
+					}; // Stop if at empty line
+					
+					// Get info
+					String name = serverHeaderSentence.split("\\s+")[0];
+					String value = serverHeaderSentence.split("\\s+", 2)[1];
+					headersMap.put(name, value);
+			}
+			
+		
+			
+			
+			// Only deal with websites using content-length
+			if (!headersMap.containsKey("Content-Length:")){
+				throw new Exception("Can only deal with websites using content-length header");
+			}
+			int counter = Integer.parseInt(headersMap.get("Content-Length:"));
+			
+			
+			// Take the appropriate action based on content-type: for now only text and images are supported
+			String contentType = headersMap.get("Content-Type:");
+			String type = contentType.split("/")[0];
+			String imageSubType = contentType.split("/")[1];
+			
+			// Create proper name for imageFile
+			String filename = uri.replace("/", "-");
+			filename = filename.replace(":", "_");
+			File imageFile = new File("C:\\Users\\Nathan\\Desktop\\" + filename); // Create image file on the desktop
+			imageFile.createNewFile();
+			
+			// Write to our image file
+			// Establish stream to file
+			FileOutputStream fos = new FileOutputStream(imageFile);
+			
+			// Reset inStream, since bufferedReader moves it's position
+			inStream.reset();
+			
+			boolean endOfHeadersReached = false;
+			int length;
+			int bufferSize = 99999;
+			byte[] b = new byte[bufferSize]; 
+
+			while ((length = inStream.read(b)) != -1){
+				System.out.println(length);
+				
+				// Write bytes to the file
+				if (endOfHeadersReached){
+					fos.write(b, 0, length);
+				} else {
+					// Check if ended by checking if double CRLF
+					for (int i=0; i < length - 3; i++){
+						if ((b[i] == 13 ) && (b[i+1] == 10) && (b[i+2] == 13) && b[i+3] == 10){
+							endOfHeadersReached = true;
+							System.out.println(Arrays.toString(Arrays.copyOfRange(b, i, i+8)));
+							System.out.println(Arrays.toString(Arrays.copyOfRange(b, length -i-6, length - i)));						
+							fos.write(b, i+4, length - i - 4);
+							break;
+						}
+					}
+				}
+			}
+			
+		    textInFromServer.close();	
+			fos.close();
+			
+
+			outStream.close();
+			dataOutStream.close();
+			clientSocket.close();	
 			
 		}
-			// TODO Finish up image retrieval
-		
+		return;
 	}
-	private static HashMap<String, String> handleHeaders(BufferedReader inFromServer, BufferedWriter bw) throws IOException {
+	private static HashMap<String, String> handleHeaders(BufferedReader textInFromServer, BufferedWriter bw) throws IOException {
 		
 		HashMap<String, String> headersMap = new HashMap<>();
 		// Keep going until at first CRLF
 		while (true) {
-				String serverHeaderSentence = inFromServer.readLine();
+				String serverHeaderSentence = textInFromServer.readLine();
 				// Check if we're at empty line
 				if (serverHeaderSentence.isEmpty()){
 					// Write that empty line
