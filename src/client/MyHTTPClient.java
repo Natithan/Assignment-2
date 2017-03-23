@@ -76,9 +76,9 @@ public class MyHTTPClient {
 			// Handle the response: display on terminal, store in file
 			handleHEADResponse(outToServer, inFromServer, requestURI);
 		}
-		if (HTTPCommand.equals("PUT")) {
-			sendPUTRequest(HTTPCommand, requestURI, Port, clientSocket, outToServer);
-			handlePUTResponse(outToServerStream, inStream, requestURI, clientSocket);
+		if (HTTPCommand.equals("PUT") || HTTPCommand.equals("POST")) {
+			sendPUTorPOSTRequest(HTTPCommand, requestURI, Port, clientSocket, outToServer);
+			handlePUTorPOSTResponse(outToServerStream, inStream, requestURI, clientSocket);
 		}
 //		if (HTTPCommand.equals("POST")) {
 //			sendPOSTRequest(HTTPCommand, requestURI, Port);
@@ -96,7 +96,7 @@ public class MyHTTPClient {
 	
 	}
 	// Prints the servers response to the terminal and stores it in a file
-	private static void handlePUTResponse(OutputStream outToServerStream, InputStream inStream, String requestURI,
+	private static void handlePUTorPOSTResponse(OutputStream outToServerStream, InputStream inStream, String requestURI,
 			Socket clientSocket) throws Exception {
 		// Create proper name for responseFile
 			String filename = requestURI.replace("/", "-");
@@ -134,7 +134,7 @@ public class MyHTTPClient {
 					// Always write complete response to an html file and terminal
 					// Store text in file and write to terminal.
 					
-					byte[] body = handleBody(counter, textInFromServer, bw);
+					handleBody(counter, textInFromServer, bw);
 		
 							
 					// Take the appropriate action based on content-type: for now only text and images are supported
@@ -159,7 +159,7 @@ public class MyHTTPClient {
 		
 	}
 	// Sends a put request
-	private static void sendPUTRequest(String HTTPCommand, String requestURI, int port, Socket clientSocket, DataOutputStream outToServer) throws IOException {
+	private static void sendPUTorPOSTRequest(String HTTPCommand, String requestURI, int port, Socket clientSocket, DataOutputStream outToServer) throws IOException {
 		
 		// parse the requestURI
 		String scheme = requestURI.split("://")[0];
@@ -283,8 +283,8 @@ public class MyHTTPClient {
 		// based on response, do correct stuff
 		if (statusCode.startsWith("1")) {
 			handleResponseLine(textInFromServer, bw);
-			// If 200, go right on
-			} else if (statusCode.startsWith("2")) {
+			// If 200 or 300, go right on
+			} else  {
 			
 				// Deal with the headers: print out and write away, and return a map containing key: header name and value: header value pairs
 				HashMap<String, String> headersMap = handleHeaders(textInFromServer, bw);
@@ -297,22 +297,24 @@ public class MyHTTPClient {
 				
 				// Always write complete response to an html file and terminal
 				// Store text in file and write to terminal.
-				
-				byte[] body = handleBody(counter, textInFromServer, bw);
+				handleBody(counter, textInFromServer, bw);
 		
-						
+				
+				if (headersMap.containsKey("Content-Type:")){
 				// Take the appropriate action based on content-type: for now only text and images are supported
 				String contentType = headersMap.get("Content-Type:");
 				String type = contentType.split("/")[0];
-				String subType = contentType.split("/")[1];
+				String subType = contentType.split("/")[1].split(";")[0];
 				
 				// Handle appropriately according to type. No longer give bufferedStream as argument, since it needn't be sequential anymore.
 				if (type.equals("text") ){
 					handleText(responseFile, requestURI, subType);
 				// Past the headers, should have a proper counter now, start dealing with message body
 				}
-			}else {
-				throw new Exception("Can't deal with this yet: " + statusCode + phrase);
+				} else if (!headersMap.get("Content-Length:").equals("0")){ // No content type, assume text/html
+					handleText(responseFile, requestURI, "html");
+				}
+			
 			}
 		
 		return;
@@ -322,17 +324,22 @@ public class MyHTTPClient {
 	}
 
 	// Method that writes the body from the server response to the same html file as the header, prints it to the terminal
-	private static byte[] handleBody(int counter, BufferedReader textInFromServer, BufferedWriter bw) throws IOException {
+	private static void handleBody(int counter, BufferedReader textInFromServer, BufferedWriter bw) throws IOException {
 		
 		
 		while (counter > 0){
+			if (textInFromServer.ready()){
 			String serverBodyLine = textInFromServer.readLine();
 			counter -= (serverBodyLine.length() + 1); // adjust counter
-			bw.write(serverBodyLine);
+			bw.write(serverBodyLine + "\r\n");
 			bw.newLine();
+			}
+			else {
+				break;
+				
+			}
 		}
 		bw.close();
-		return new byte[0];
 	}
 
 	// Handles message body of type text appropriately
@@ -523,7 +530,9 @@ public class MyHTTPClient {
 				// Wrong command
 				COMMANDS.stream().anyMatch(COMMAND -> (COMMAND.equals(argv[0]))) &&
 				// Wrong URI
-				argv[1].matches("^(https?|ftp|file)://[-a-zA-Z0-9+&@#/%?=~_|!:,.;]*[-a-zA-Z0-9+&@#/%=~_|]") &&
+				(argv[1].matches("^(https?|ftp|file)://[-a-zA-Z0-9+&@#/%?=~_|!:,.;]*[-a-zA-Z0-9+&@#/%=~_|]") ||
+						(argv[1].matches("localhost((/){1}[-a-zA-Z0-9+&@#/%?=~_|!:,.;]*)*")))
+						&&
 				// Wrong PORT
 				argv[2].matches("[0-9]*");
 	}

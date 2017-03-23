@@ -7,9 +7,9 @@ import java.util.Arrays;
 public class testaah {
 
 	public static void main(String[] args) throws URISyntaxException {
-		String entity = "dsqjfmlqfjsd";
-		String contentLengthHeader = "Content-Length: " + entity.length();
-		System.out.println(contentLengthHeader);
+		String message = "HEAD /pics/nursinggoat.jpg HTTP/1.1";
+		String filePath = message.split("\\s")[2];
+		System.out.println(filePath);
 	}
 
 }
