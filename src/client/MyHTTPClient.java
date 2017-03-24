@@ -73,6 +73,7 @@ public class MyHTTPClient {
 		}
 		else if (HTTPCommand.equals("HEAD")) {
 			sendHEADRequest(HTTPCommand, requestURI, Port, outToServer, domain);
+			System.out.println(clientSocket.getInputStream().available());
 			// Handle the response: display on terminal, store in file
 			handleHEADResponse(outToServer, inFromServer, requestURI);
 		}
@@ -90,6 +91,7 @@ public class MyHTTPClient {
 		
 		// Close the connection
 		clientSocket.close();
+		return;
 		
 		
 
@@ -202,6 +204,12 @@ public class MyHTTPClient {
 	private static void handleHEADResponse(DataOutputStream outToServer, BufferedReader inFromServer,
 			String requestURI) throws Exception {
 		// Create proper name for responseFile
+		// parse the requestURI
+				String scheme = requestURI.split("://")[0];
+				String domain = requestURI.split("//")[1].split("/")[0];
+				String baseURI = scheme + "://" + domain + "/";
+				String path = requestURI.replace(baseURI, "");
+				
 				String filename = requestURI.replace("/", "-");
 				filename = filename.replace(":", "_");
 				
@@ -225,8 +233,7 @@ public class MyHTTPClient {
 	}
 	// Prints out and stores the ResponseLine, and returns the protocol version, status code and its associated textual phrase
 	private static String[] handleResponseLine(BufferedReader textInFromServer, BufferedWriter bw) throws Exception {
-		String serverResponseLine = textInFromServer.readLine();
-		System.out.println(serverResponseLine);
+		String serverResponseLine = textInFromServer.readLine(); 
 		String protocolVersion = serverResponseLine.split("\\s+")[0];
 		String statusCode = serverResponseLine.split("\\s+")[1];
 		String phrase = serverResponseLine.split("\\s+", 3)[2];
@@ -331,6 +338,7 @@ public class MyHTTPClient {
 			if (textInFromServer.ready()){
 			String serverBodyLine = textInFromServer.readLine();
 			counter -= (serverBodyLine.length() + 1); // adjust counter
+			System.out.println(serverBodyLine);
 			bw.write(serverBodyLine + "\r\n");
 			bw.newLine();
 			}
@@ -353,7 +361,6 @@ public class MyHTTPClient {
 		else {
 			return;
 		}
-		return;
 	}
 	
 	// Method that checks for embedded images and stores those, still with the same connection
@@ -462,8 +469,8 @@ public class MyHTTPClient {
 					for (int i=0; i < length - 3; i++){
 						if ((b[i] == 13 ) && (b[i+1] == 10) && (b[i+2] == 13) && b[i+3] == 10){
 							endOfHeadersReached = true;
-							System.out.println(Arrays.toString(Arrays.copyOfRange(b, i, i+8)));
-							System.out.println(Arrays.toString(Arrays.copyOfRange(b, length -i-6, length - i)));						
+//							System.out.println(Arrays.toString(Arrays.copyOfRange(b, i, i+8)));
+//							System.out.println(Arrays.toString(Arrays.copyOfRange(b, length -i-6, length - i)));						
 							fos.write(b, i+4, length - i - 4);
 							break;
 						}
@@ -530,8 +537,7 @@ public class MyHTTPClient {
 				// Wrong command
 				COMMANDS.stream().anyMatch(COMMAND -> (COMMAND.equals(argv[0]))) &&
 				// Wrong URI
-				(argv[1].matches("^(https?|ftp|file)://[-a-zA-Z0-9+&@#/%?=~_|!:,.;]*[-a-zA-Z0-9+&@#/%=~_|]") ||
-						(argv[1].matches("localhost((/){1}[-a-zA-Z0-9+&@#/%?=~_|!:,.;]*)*")))
+				(argv[1].matches("^(https?|ftp|file)://[-a-zA-Z0-9+&@#/%?=~_|!:,.;]*[-a-zA-Z0-9+&@#/%=~_|]"))
 						&&
 				// Wrong PORT
 				argv[2].matches("[0-9]*");
